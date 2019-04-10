@@ -69,7 +69,6 @@ class OCW(object):
         return len(entry[k])
 
 
-
 if __name__ == "__main__":
     '''
     Example of parsing through a department in order to create course records.
