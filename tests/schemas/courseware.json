@@ -1,0 +1,37 @@
+{
+    "title": "Courseware Schema",
+    "type": "object",
+    "properties": {
+        "course_image_path": {
+            "type": "string"
+        },
+        "course_path": {
+            "type": "string"
+        },
+        "course_section_and_tlp_urls": {
+            "description": "List of all valid resource types/headings.",
+            "type": "array",
+            "minimum": 0
+        }, 
+        "course_topics": {
+            "description": "Array of records containing topic, subtopic, speciality.",
+            "type": "array",
+            "items": { 
+                "type": "object",
+                "properties": {
+                    "topic": { "$ref": "#/definitions/non-empty-string" },
+                    "subtopic": { "$ref": "#/definitions/non-empty-string" },
+                    "speciality": { "$ref": "#/definitions/non-empty-string" }
+                }
+            },
+            "required": ["topic", "subtopic", "speciality"]
+        }
+    },
+    "definitions": {
+        "non-empty-string": {
+        "type": "string",
+        "minLength": 1
+        }
+    },
+    "required": ["course_image_path", "course_topics"]
+  }
