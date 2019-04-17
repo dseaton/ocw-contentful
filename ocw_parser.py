@@ -63,10 +63,10 @@ class OCW(object):
         return entry[k]
 
     def _media_resources(self, entry, k):
-        return len(entry[k])
+        return entry[k]
     
     def _pdf_list(self, entry, k):
-        return len(entry[k])
+        return entry[k]
 
 
 if __name__ == "__main__":
@@ -80,6 +80,5 @@ if __name__ == "__main__":
 
     '''
     department = OCW('https://ocw.mit.edu/courses/physics/physics.json')
-    for course_datum in department.jdata[slice(0,2)]:
-        record = department.parse_course(course_datum)
-        print(record)
+    record = department.parse_course('8-286-the-early-universe-fall-2013')
+    pprint(record)

@@ -1,3 +1,11 @@
 MANAGEMENT_API_TOKEN='FOUND_IN_YOUR_CONTENTFUL_SETTINGS'
 SPACE_ID = 'FOUND_IN_YOUR_CONTENTFUL_SETTINGS'
 ENVIRONMENT_ID = 'FOUND_IN_YOUR_CONTENTFUL_SETTINGS'
+
+departments = {
+    'mathematics': 'CONTENTFUL_ENTRY_ID',
+    'physics': 'CONTENTFUL_ENTRY_ID',
+    'biology': 'CONTENTFUL_ENTRY_ID',
+    'electrical-engineering-and-computer-science': 'CONTENTFUL_ENTRY_ID',
+    'aeronautics-and-astronautics': 'CONTENTFUL_ENTRY_ID,'
+}

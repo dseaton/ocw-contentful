@@ -7,12 +7,10 @@ import secure
 
 
 class Translate(object):
-    def __init__(self, department_clink_id):
+    def __init__(self):
         '''
         Must be called with a department already set.
-        '''
-        
-        self.department_clink_id = department_clink_id
+        '''        
         self.client = contentful_management.Client(secure.MANAGEMENT_API_TOKEN)
         self.entries_client = self.client.entries(secure.SPACE_ID, secure.ENVIRONMENT_ID)
         self.content_types_client = self.client.content_types(secure.SPACE_ID, secure.ENVIRONMENT_ID)
@@ -30,25 +28,39 @@ class Translate(object):
 
         # Return the entry if the entry_uid already exists in Contentul 
         try:
-            return getattr(self.client, 'content_type_name', None).entries().find(entry_uid)
+            return self.entries_client.find(entry_uid)
         except:
             print("Creating {}: {}".format(content_type_name, entry_uid))
         
         # Create the entry and return 
-        try:
-            # content_type = self.content_types_client.find(content_type_name) # Naming convention important
-            # ids = [f.id for f in content_type.fields] 
-            # lookup = dict((i, entry_attributes.get(i, None)) for i in ids)
-
-            return self.entries_client.create(
-                entry_uid, 
-                getattr(self, content_type_name)(entry_attributes) # naming convention required
-            )
-        except Exception as e:
-            print("Issue creating type={}, entry_uid={}".format(content_type_name, entry_uid))
-            print(e)
-            return None
+        return self.entries_client.create(
+            entry_uid, 
+            getattr(self, content_type_name)(entry_attributes) # naming convention required
+        )
     
+    def pdfResource(self, lookup):
+        return {
+            'content_type_id': 'pdfResource',
+            'fields': {
+                'courseware': self._multi_reference_field([lookup['courseware']]),
+                'path': self._text_field(lookup['path']),
+                'subtopic': self._multi_reference_field([lookup['subtopic']]),
+                'trackingTitle': self._text_field(lookup['tracking_title']),
+                'pdfType': self._text_field(lookup['pdf_type']),
+            }
+        }
+
+    def mediaResource(self, lookup):
+        return {
+            'content_type_id': 'mediaResource',
+            'fields': {
+                'path': self._text_field(lookup['path']),
+                'title': self._text_field(lookup['title']),
+                'youTubeId': self._text_field(lookup['youtube_id']),
+                'courseware': self._multi_reference_field([lookup['courseware']]),
+            }
+        }
+
     def topic(self, lookup):
         return {
             'content_type_id': 'topic',
@@ -104,6 +116,7 @@ class Translate(object):
                 'coursePath': self._text_field(lookup['course_path']),
                 'instructors': None,
                 'keywords': None,
+                'mediaResources': None,
             }
         }
     
@@ -134,5 +147,12 @@ if __name__ == "__main__":
     eid = secure.ENVIRONMENT_ID
     content_type = client.content_types(sid, eid).find('instructor')
 
-    T = Translate('1c5BaHz1xsxiNogsMkMQPr')
-    pprint(T.autoInstructor({'name': 'Daniel Seaton', 'title': 'Dr.', 'bio': 'New at ODL.'}))
+    T = Translate()
+    pprint(
+        T.autoInstructor({
+            'name': 'Daniel Seaton', 
+            'title': 'Dr.', 
+            'bio': 'New at ODL.',
+            'department_clink_id': '1c5BaHz1xsxiNogsMkMQPr'
+        })
+    )
