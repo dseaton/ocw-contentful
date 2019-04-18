@@ -9,31 +9,42 @@ from pprint import pprint
 class OCW(object):
     def __init__(self, department_url):
         """
-        JSON data is organized by department. Each department has a list of courses with
-        metadata and file links nested by type. In order to get to a single course, we 
-        start with the department JSON, then loop through each course. So we start by 
-        loading all data for a given department.
+        OCW provides courseware data in a JSON format organized by department. Each 
+        department has a list of courses with metadata and file links  nested by type. 
+        In order to get to a single course, we load the department data, then access a 
+        single course (ocw uids are keys) or loop through courses. Department URL
+        example:  https://ocw.mit.edu/courses/biology/biology.json
 
-        :param department_url: OCW endpoint for deparment JSON data (e.g., https://ocw.mit.edu/courses/biology/biology.json)
-        jdata: json data returned from the input url
+        :param department_url: OCW endpoint for deparment JSON data 
+        
+        Attributes
+        ----------
+        :department_url: OCW endpoint used to initiate object
+        :jdata: json data returned from the input url
 
         Future work: automatically grab department Contentful ID
         """
         self.department_url = department_url
-        self.jdata = json.loads(urllib.urlopen(department_url).read())
         
         #Munge department data so ocw uid are directly the keys of the json data
         #Will allow us to parse one course at a time, or reparse a course to make updates/fix
         jdata = json.loads(urllib.urlopen(department_url).read())
         self.jdata = dict((v.keys()[0], v[v.keys()[0]]) for v in jdata)
-        
+
         print("Parsing the following OCW endpoint: {}".format(department_url))
-    
+
     def parse_course(self, ocw_uid):
         """
-        ocw_uid: unique key identifying specific course within the course_datum; created by OCW
-        course_datum: a nested json object containing all relevant metadata and content links
-        :return: pd.DataFrame with course IDs as indices and metadata as columns
+        Given a specific ocw_uid, visitor pattern iteration through each object within 
+        the nested json. If the object type is not specified as a parsing function, parsing
+        falls back to  _default. 
+        
+        Current implementation is admittedly bare. Considering moving transformation code 
+        from ocw2contentful.py to each parsing function.
+
+        :param ocw_uid: unique key identifying specific course within the course_datum; created by OCW
+        :param course_datum: a nested json object containing all relevant metadata and content links for a single course
+        :returns: json data representing transformation of course_datum 
         """
         course_datum = self.jdata[ocw_uid]
         
@@ -71,13 +82,7 @@ class OCW(object):
 
 if __name__ == "__main__":
     '''
-    Example of parsing through a department in order to create course records.
-    Fundamentally, we need to start by creating courses, then creating and 
-    associating other entries with the course.
-
-    For example, parse the course, create in Contentful, then go back 
-    through faculty, create if they do not exist, and associate with course.
-
+    Example of parsing a single course from the physics department.
     '''
     department = OCW('https://ocw.mit.edu/courses/physics/physics.json')
     record = department.parse_course('8-286-the-early-universe-fall-2013')

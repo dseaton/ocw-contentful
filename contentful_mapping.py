@@ -137,16 +137,15 @@ class Translate(object):
     
 
 if __name__ == "__main__":
-    import contentful_management
     from pprint import pprint
-    import secure
     
-    # Example use for creating an instructor
+    # Example using the Contentful client
     client = contentful_management.Client(secure.MANAGEMENT_API_TOKEN)
     sid = secure.SPACE_ID
     eid = secure.ENVIRONMENT_ID
     content_type = client.content_types(sid, eid).find('instructor')
 
+    # Translation of metadata to a Contentful entry
     T = Translate()
     pprint(
         T.autoInstructor({

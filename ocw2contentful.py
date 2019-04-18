@@ -14,7 +14,8 @@ eid = secure.ENVIRONMENT_ID
 class Ocw2Contentful(object):        
     def __init__(self, department_url, department_clink_id):
         """
-        :deparment_clink_id: Contentful Department Entry ID 
+        :param department_url: OCW url pointing to JSON department data; used to init ocw_parser
+        :param deparment_clink_id: Contentful Department Entry ID 
         """
         self.OCW = OCW(department_url)
         self.department_clink_id = department_clink_id
@@ -22,7 +23,11 @@ class Ocw2Contentful(object):
 
 
     def _generate_courseware_uid(self, record):
-        # unique id assigned in contentful (length 1 to 64 characters); ocw uids are too long
+        """
+        Assign a unique ID for new entry in Contentful (length 1 to 64 characters); ocw uids are too long.
+        :param record: JSON data for single course. 
+        :return: unique ID made up of course metadata.
+        """
         return '__'.join(['OCW', record['master_course_number'], record['year'], record['term'].strip()])        
         
     def _make_camel(self, string):
@@ -30,7 +35,11 @@ class Ocw2Contentful(object):
     
     def _create_courseware(self, ocw_uid, record):
         """
-        :param record: OCW json data for a given ocw_uid
+        Create an autoCourseware entry inside Contentful space. Does not create if the
+        entry already exists.
+
+        :param ocw_uid: unique identifier found in OCW JSON data (keys of department data)
+        :param record: OCW json data for a given for a single course
         :return: Contentful Entry for autocourseware content type
         """ 
         contentful_uid = self._generate_courseware_uid(record)
@@ -47,11 +56,12 @@ class Ocw2Contentful(object):
         
     def _create_instructor(self, faculty_name):
         """
-        Given a faculty name from OCW data, create the entry if it does not exist. Prof and Dr distinguish
-        between faculty and instructors (other).
-            Prof. Krishna Rajagopal
-            Dr. Saif Rayyan
-        :param faculty_name: str name formatted in a typical way (Dr. Daniel Seaton)
+        Create an autoInstructor entry inside Contentful space. Does not create if the
+        entry already exists. Typical entry looks like:
+            Example 1: Prof. Krishna Rajagopal
+            Example 2: Dr. Saif Rayyan
+        
+        :param faculty_name: str name formatted in a typical way (Dr. Saif Rayyan)
         :return: Contentful Entry for instructor content type 
         """
         contentful_uid = self._make_camel(faculty_name)
@@ -60,14 +70,13 @@ class Ocw2Contentful(object):
             'name': faculty_name.split('.')[1] if '.' in faculty_name else faculty_name,
             'title': faculty_name.split('.')[0] if '.' in faculty_name else None,
         }
-        
         return self.T.create_entry('autoInstructor', contentful_uid, instructor_meta)
 
     def _create_tag(self, content_type_name, tag_value):
         """
         Current OCW tagging hierarchy: Topic -> Subtopic -> Speciality
         In Contentful, created content_types for each with multi-references.
-        Original Format (we extract unique values, create if the don't exist, and update links to courseware):
+        Original Format (we extract unique values, create if do not exist, and update links to courseware):
                     {u'speciality': u'Astrophysics',
                      u'subtopic': u'Physics',
                      u'topic': u'Science'},
@@ -75,12 +84,11 @@ class Ocw2Contentful(object):
                      u'subtopic': u'Physics',
                      u'topic': u'Science'}
         
-        :param content_type: the content_type name from Contentful. Set up to take 0 index of unique tuple.        
-        :param topic_set: value to be put in tag.
+        :param content_type_name: the content_type name from Contentful.        
+        :param tag_value: value to be put in tag.
         :return: Contentful Entry for the tag content type [Topic, Subtopic, or Speciality]
         """
         contentful_uid = self._make_camel(tag_value)
-        # tag_type = getattr(self, content_type+'_type')
         tag_meta = {'title': tag_value}
 
         return self.T.create_entry(content_type_name, contentful_uid, tag_meta)
@@ -97,6 +105,7 @@ class Ocw2Contentful(object):
                 ...
             ] 
         :param media_record: media resource entry from OCW JSON data. 
+        :param courseware_uid: Contentful unique id that lets us associate a course with this tag.
         :return: mediaResource entry from Contentful.
         """
         contentful_uid = media_record[media_record.keys()[0]]['YouTube']['youtube_id']
@@ -130,7 +139,10 @@ class Ocw2Contentful(object):
                 ...
             ]
         }
-        :param pdf_record: media resource entry from OCW JSON data. 
+        :param pdf_path: url location of a given pdf file. 
+        :param pdf_type: refers to OCW designations of course structure (exams, assignments, lecture-slides, etc).
+        :param sub_topic: subtopic for a given courseware, so user gets an idea of topic for a pdf in Contentful.
+        :param courseware_uid: Contentful unique id that lets us associate a course with this tag.
         :return: mediaResource entry from Contentful.
         """
         contentful_uid = pdf_path.split('/')[-1]
@@ -204,15 +216,13 @@ class Ocw2Contentful(object):
         courseware.save()
         
         courseware.publish()
-
         return courseware
 
 
 if __name__ == "__main__":
     '''
-    Example of populating a Contentful space with a single OCW course.
+    Examples of populating a Contentful space with OCW content.
     '''
-    
     ### Testing single courses
     # dept = 'physics'
     # cuid = '8-286-the-early-universe-fall-2013'
