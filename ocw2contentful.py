@@ -192,7 +192,7 @@ class Ocw2Contentful(object):
 
         #Step 4: iterate through media resources; create if does not exist, link to courseware
         mlinks = []
-        for m in record['media_resources'][slice(0,4)]:
+        for m in record['media_resources']: #[slice(0,4)]:
             mlinks.append(self._create_media_resource(m, getattr(courseware, 'id')))
 
         courseware.media_resources = [ml for ml in mlinks] # Update courseware with media links
@@ -202,7 +202,7 @@ class Ocw2Contentful(object):
         for ptype in ['assignments', 'exams']:
             if ptype in record['pdf_list']:
                 plinks = []
-                for path in record['pdf_list'][ptype][slice(0,4)]:
+                for path in record['pdf_list'][ptype]: #[slice(0,4)]:
                     plinks.append(
                         self._create_pdf_resource(
                             path, 
@@ -215,7 +215,7 @@ class Ocw2Contentful(object):
                 setattr(courseware, ptype, [pl for pl in plinks])
         courseware.save()
         
-        courseware.publish()
+        # courseware.publish()
         return courseware
 
 
@@ -224,18 +224,27 @@ if __name__ == "__main__":
     Examples of populating a Contentful space with OCW content.
     '''
     ### Testing single courses
-    # dept = 'physics'
-    # cuid = '8-286-the-early-universe-fall-2013'
-    # url = 'https://ocw.mit.edu/courses/{}/{}.json'.format(dept, dept)
-    # tmp = Ocw2Contentful(url, secure.departments[dept])
-    # record = tmp.OCW.parse_course(cuid)
+    dept = 'physics'
+    cuid = '8-286-the-early-universe-fall-2013'
+    url = 'https://ocw.mit.edu/courses/{}/{}.json'.format(dept, dept)
+    tmp = Ocw2Contentful(url, secure.departments[dept])
+    record = tmp.OCW.parse_course(cuid)
     # print(record)
-    # # tmp.add_courseware(cuid) # single instructor, minimal tags
+    tmp.add_courseware(cuid) # single instructor, minimal tags
 
     ### Test loading multiple courses across multiple departments
-    for k,v in secure.departments.iteritems():
-        tmp = Ocw2Contentful('https://ocw.mit.edu/courses/{}/{}.json'.format(k, k), v)
-        for cuid in tmp.OCW.jdata.keys()[slice(0,3)]:
-            print(cuid)
-            # tmp.add_courseware(cuid)
-            print('\n')
+    # for k,v in secure.departments.iteritems():
+    #     tmp = Ocw2Contentful('https://ocw.mit.edu/courses/{}/{}.json'.format(k, k), v)
+    #     for cuid in tmp.OCW.jdata.keys()[slice(0,5)]:
+    #         print(cuid)
+    #         tmp.add_courseware(cuid)
+    #         print('\n')
+
+    # k = 'aeronautics-and-astronautics'
+    # v = secure.departments[k]
+    # tmp = Ocw2Contentful('https://ocw.mit.edu/courses/{}/{}.json'.format(k, k), v)
+    # for cuid in tmp.OCW.jdata.keys()[slice(0,5)]:
+    #     print(cuid)
+    #     # print(tmp.OCW.jdata[cuid])
+    #     tmp.add_courseware(cuid)
+    #     print('\n')

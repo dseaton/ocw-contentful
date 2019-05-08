@@ -2,10 +2,6 @@ import json
 import urllib
 
 
-import json
-import urllib
-from pprint import pprint
-
 class OCW(object):
     def __init__(self, department_url):
         """
@@ -81,9 +77,11 @@ class OCW(object):
 
 
 if __name__ == "__main__":
-    '''
+    """
     Example of parsing a single course from the physics department.
-    '''
+    """
+    from pprint import pprint
+
     department = OCW('https://ocw.mit.edu/courses/physics/physics.json')
     record = department.parse_course('8-286-the-early-universe-fall-2013')
     pprint(record)
