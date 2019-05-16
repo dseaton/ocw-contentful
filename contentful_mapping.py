@@ -30,25 +30,14 @@ class Translate(object):
         try:
             return self.entries_client.find(entry_uid)
         except:
-            print("Creating {}: {}".format(content_type_name, entry_uid))
+            # print(type(content_type_name), type(str(entry_uid.encode)))
+            print "Creating {}: {}".format(content_type_name, entry_uid)
         
         # Create the entry and return 
         return self.entries_client.create(
             entry_uid, 
             getattr(self, content_type_name)(entry_attributes) # naming convention required
         )
-    
-    def pdfResource(self, lookup):
-        return {
-            'content_type_id': 'pdfResource',
-            'fields': {
-                'courseware': self._multi_reference_field([lookup['courseware']]),
-                'path': self._text_field(lookup['path']),
-                'subtopic': self._multi_reference_field([lookup['subtopic']]),
-                'trackingTitle': self._text_field(lookup['tracking_title']),
-                'pdfType': self._text_field(lookup['pdf_type']),
-            }
-        }
 
     def mediaResource(self, lookup):
         return {
@@ -61,67 +50,63 @@ class Translate(object):
             }
         }
 
-    def topic(self, lookup):
-        return {
-            'content_type_id': 'topic',
-            'fields': {
-                'title': self._text_field(lookup['title']),
-            }
-        }
-
-    def subtopic(self, lookup):
-        return {
-            'content_type_id': 'subtopic',
-            'fields': {
-                'title': self._text_field(lookup['title']),
-            }
-        }
-
-    def speciality(self, lookup):
-        return {
-            'content_type_id': 'speciality',
-            'fields': {
-                'title': self._text_field(lookup['title']),
-            }
-        }
-
-    def autoInstructor(self, lookup):
+    def courseware(self, entry_attributes):
         return { 
-            'content_type_id': 'autoInstructor',
-            'fields': {
-                'name': self._text_field(lookup['name']),
-                'title': self._text_field(lookup['title']),
-                'department': self._multi_reference_field([lookup['department_clink_id']]),
-                'bio': None,
-                'courseware': None,
-            }
+            'content_type_id': 'courseware',
+            'fields': {self.to_camel_case(e): self._set_field_type(v) for e,v in entry_attributes.iteritems()}
+        }
+
+    def instructor(self, entry_attributes):
+        return { 
+            'content_type_id': 'instructor',
+            'fields': {self.to_camel_case(e): self._set_field_type(v) for e,v in entry_attributes.iteritems()}
         }
     
-    def autoCourseware(self, lookup):
-        return { #[faculty for faculty in course_info['faculty']]
-            'content_type_id': 'autoCourseware',
-            'fields': {
-                'trackingTitle': self._text_field(lookup['tracking_title']),
-                'courseTitle': self._text_field(lookup['course_title']),
-                'courseImage': None,
-                'courseImagePath': self._text_field(lookup['course_image_path']),
-                'department': self._multi_reference_field([lookup['department_clink_id']]),
-                'description': None,
-                'plainTextDescription': self._text_field(lookup['description']),
-                'courseUid': self._text_field(lookup['course_uid']),
-                'term': self._text_field(lookup['term']),
-                'year': self._text_field(lookup['year']),
-                'level': self._text_field(lookup['level']),
-                'masterCourseNumber': self._text_field(lookup['master_course_number']),
-                'coursePath': self._text_field(lookup['course_path']),
-                'instructors': None,
-                'keywords': None,
-                'mediaResources': None,
-            }
+    def tag(self, entry_attributes):
+        return {
+            'content_type_id': 'tag',
+            'fields': {self.to_camel_case(e): self._set_field_type(v) for e,v in entry_attributes.iteritems()}
         }
-    
+
+    def department(self, entry_attributes):
+        return {
+            'content_type_id': 'department',
+            'fields': {self.to_camel_case(e): self._set_field_type(v) for e,v in entry_attributes.iteritems()}
+        }
+
+    def course_page(self, entry_attributes):
+        return {
+            'content_type_id': 'coursePage',
+            'fields': {self.to_camel_case(e): self._set_field_type(v) for e,v in entry_attributes.iteritems()}
+        }
+
+    def course_file(self, entry_attributes):
+        return {
+            'content_type_id': 'courseFile',
+            'fields': {self.to_camel_case(e): self._set_field_type(v) for e,v in entry_attributes.iteritems()}
+        }
+
+    def embedded_media(self, entry_attributes):
+        return {
+            'content_type_id': 'embeddedMedia',
+            'fields': {self.to_camel_case(e): self._set_field_type(v) for e,v in entry_attributes.iteritems()}
+        }
+
+    def _set_field_type(self, v):
+        if isinstance(v, unicode):
+            return self._text_field(v)
+        elif isinstance(v, contentful_management.entry.Entry):
+            return self._single_reference_field(v.sys['id'])
+        elif isinstance(v, list):
+            return self._multi_reference_field([l.sys['id'] for l in v])
+        else:
+            return None
+
     def _text_field(self, value):
-        return {'en-US': value}
+        if value!='':
+            return {'en-US': value}
+        else:
+            return None
     
     def _single_reference_field(self, value):
         return {'en-US': self._sys_field(value)}
@@ -134,6 +119,10 @@ class Translate(object):
         param cid: contentful id
         '''
         return {'sys': {'type': 'Link', 'linkType': 'Entry', 'id': cid}}
+
+    def to_camel_case(self, string):
+        components = string.replace('-','_').split('_')
+        return components[0] + ''.join(x.title() for x in components[1:])
     
 
 if __name__ == "__main__":

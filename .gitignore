@@ -2,6 +2,7 @@ secure.py
 venv-ocw
 .vscode
 
+*.json
 *.pyc
 *.ipynb
 *.ipynb_checkpoints
