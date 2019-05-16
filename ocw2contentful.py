@@ -23,7 +23,8 @@ class Ocw2Contentful(object):
         self.T = Translate()
         department_url = "https://ocw.mit.edu/courses/find-by-number/departments.json"
         jdata = json.loads(urllib.urlopen(department_url).read())
-        self.departments = dict((r['depNo'], r) for r in jdata)
+        self.departments_by_num = dict((r['depNo'], r) for r in jdata)
+        self.departments_by_title = dict((r['title'], r) for r in jdata)
 
     def get_courseware_metadata(self, ocw_url):
         """
@@ -48,47 +49,26 @@ class Ocw2Contentful(object):
     def _make_camel(self, string):
         return ''.join(x for x in string.title() if x.isalnum())
 
-    def _create_media_resource(self, media_record, courseware_uid):
-        """
-        OCW media resources. Formatted as a list of individual records. Single example from list of media resources:
-            [
-                {u'Lecture 23: Inflation': {
-                    u'path': u'courses/physics/8-286-the-early-universe-fall-2013/video-lectures/lecture-23-inflation', 
-                    u'YouTube': {u'youtube_id': u'PsfyE1-s9Rs'}
-                }
-                },
-                ...
-            ] 
-        :param media_record: media resource entry from OCW JSON data. 
-        :param courseware_uid: Contentful unique id that lets us associate a course with this tag.
-        :return: mediaResource entry from Contentful.
-        """
-        contentful_uid = media_record[media_record.keys()[0]]['YouTube']['youtube_id']
+    def _generate_tracking_title(self, courseware, title):
+        return u"{}.{} - {}".format(
+            courseware.fields()['department_number'], 
+            courseware.fields()['master_course_number'], 
+            title
+        )
 
-        m_meta = {
-            'title': media_record.keys()[0],
-            'youtube_id': contentful_uid,
-            'path': media_record[media_record.keys()[0]]['path'],
-            'courseware': courseware_uid,
-        }
-        return self.T.create_entry('mediaResource', contentful_uid, m_meta)
-
-    
-
-    def _create_department(self, drecord):
-        """
-        Given a department number, for example:
-            "department_number": "1"
-
-        Use the old JSON data to look up metadata for the department and create an entry.
-        :param dept_number: str, giving MIT code for department (can contain letters, CC is Concourse)
-        """
-        contentful_uid = drecord['id']
-        metadata = dict((k,drecord[k]) for k in drecord.keys() if isinstance(drecord[k], unicode)==True)
-        return self.T.create_entry('department', contentful_uid, metadata)
+    def _prepare_metadata(self, record, delete_fields=None, additional_metadata=None):
+        metadata = dict((k,record[k]) for k in record.keys() if isinstance(record[k], unicode)==True)
+        if delete_fields:
+            for k in delete_fields:
+                if k in metadata:
+                    del metadata[k]
         
+        if additional_metadata:
+            metadata.update(additional_metadata)
 
-    def _create_courseware(self, record):
+        return metadata
+
+    def create_courseware(self, record):
         """
         Create an autoCourseware entry inside Contentful space. Does not create if the
         entry already exists.
@@ -96,21 +76,36 @@ class Ocw2Contentful(object):
         :param record: OCW json data for a single course.
         :return: Contentful Entry for autocourseware content type.
         """ 
-        courseware_meta = dict((k,record[k]) for k in record.keys() if isinstance(record[k], unicode)==True)
-        added_meta = {
-            u'tracking_title': u"{}.{} - {}".format(
-                record['department_number'], 
-                record['master_course_number'], 
-                record['title']
-            ),
-        }
-        courseware_meta.update(added_meta)
-        for k in ['uid', 'course_owner']:
-            del courseware_meta[k]
-    
-        return self.T.create_entry('courseware', record['uid'], courseware_meta)
+        department_entry = self.create_department(self.departments_by_num[record['department_number']])
+        tracking_title = u"{}.{} - {}".format(record['department_number'], record['master_course_number'], record['title'])
+        metadata = self._prepare_metadata(
+            record, 
+            delete_fields=['uid', 'course_owner'],
+            additional_metadata={
+                u'department': [department_entry],
+                u'tracking_title': tracking_title,
+            },
+        )
+        return self.T.create_entry('courseware', record['uid'], metadata)
 
-    def _create_instructor(self, irecord):
+    def create_department(self, record):
+        """
+        Most department metadata for OCW are simply department numbers or titles (e.g., "7" or "Biology").
+        Use self.departments_by_num to look up a record based on number (self.departments_by_title looks up by title).
+
+        Each look up returns a department record from the old JSON data for OCW (best we have currently).
+            {u'depNo': u'7', u'id': u'biology', u'title': u'Biology'}
+
+        :param record: dict, with fields shown above
+        """
+        metadata = self._prepare_metadata(
+            record, 
+            delete_fields=None,
+            additional_metadata=None,
+        )
+        return self.T.create_entry('department', record['id'], metadata)
+
+    def create_instructor(self, record, courseware):
         """
         Create an Instructor entry inside Contentful space. Does not create if the
         entry already exists. Example:
@@ -129,13 +124,20 @@ class Ocw2Contentful(object):
         :param irecord: JSON record with instructor metadata
         :return: Contentful Entry for instructor content type 
         """
-        metadata = dict((k,irecord[k]) for k in irecord.keys() if isinstance(irecord[k], unicode)==True)
-        for k in ['uid', 'mit_id', 'department']:
-            del metadata[k]
+        ### Pattern Break: faculty listed by school, rather than department (e.g., School of Engineering)
+        if record['department'] in self.departments_by_title:
+            department_entry = self.create_department(self.departments_by_title[record['department']])
+        else:
+            department_entry = None
+        
+        metadata = self._prepare_metadata(
+            record, 
+            delete_fields=['uid', 'mit_id', 'department'],
+            additional_metadata={'department': [department_entry]},
+        )
+        return self.T.new_create_entry('instructor', record['uid'], metadata)
 
-        return self.T.create_entry('instructor', irecord['uid'], metadata)
-
-    def _create_tag(self, trecord):
+    def create_tag(self, record):
         """
         Old OCW tagging hierarchy: Topic -> Subtopic -> Speciality
         New tagging is just a list of keywords.
@@ -146,14 +148,47 @@ class Ocw2Contentful(object):
             ...
         ]
     
-        :param trecord: JSON record with tag metadata (sparse)
+        :param record: JSON record with tag metadata 
         :return: Contentful Entry for the tag 
         """
-        contentful_uid = self._make_camel(trecord['name'][0:64]) # contentful uids only 64 char long
-        metadata = dict((k,trecord[k]) for k in trecord.keys() if isinstance(trecord[k], unicode)==True)
-        return self.T.create_entry('tag', contentful_uid, metadata)
+        uid = self._make_camel(record['name'][0:64]) # contentful uids only 64 char long
+        metadata = self._prepare_metadata(
+            record, 
+            delete_fields=None,
+            additional_metadata=None,
+        )
+        return self.T.create_entry('tag', uid, metadata)
 
-    def _create_course_file(self, cfrecord, courseware):
+    def create_course_page(self, record, courseware):
+        """
+        Example Course File.
+        {
+            "uid": "cbe32f43b1c1045bb68f4b3197ae3655",
+            "title": "Syllabus",
+            "url": "/courses/civil-and-environmental-engineering/1-050-solid-mechanics-fall-2004/syllabus",
+            "text": "<h2 class=\"subhead\">Course Meeting Times</h2> <p>Lectures: 3 sessions / week, 1 hour / session</p> <p>Labs: 2 sessions / week, 1 hour / session</p> <h3 class=\"subsubhead\">Course Introduction by Prof. Louis Bucciarelli</h3><p>65153023courseintroduction80419621</p><h2 class=\"subhead\">Objectives</h2> <p>The aim is to introduce students to the fundamental concepts and principles applied by engineers - whether civil, mechanical, aeronautical, etc.&nbsp;- in the design of structures of all sorts of sizes and purpose. We build upon the mathematics and physics courses of the freshman year, extending Newtonian Mechanics to address and understand the elastic behavior of trusses and frames, beams and cylinders. We aim also to engage students in the formulation and resolution of open-ended, design-type exercises, thereby bridging the divide between scientific theory and engineering practice.</p> <h2 class=\"subhead\">Textbook</h2> <p>Bucciarelli, Louis. <a href=\"http://store.doverpublications.com/0486468550.html\"><em>Engineering Mechanics for Structures</em></a>, Fall 2002. (The full text is published in the <a href=\"/courses/civil-and-environmental-engineering/1-050-solid-mechanics-fall-2004/readings\">readings section</a>.)</p> <p>Also required: Mead Quad Composition notebook.</p> <h2 class=\"subhead\">Other Resources</h2> <p><a href=\"http://www.amazon.com/exec/obidos/ASIN/0070134367/ref=nosim/mitopencourse-20\"><img alt=\"Buy at Amazon\" src=\"/images/a_logo_17.gif\" border=\"0\" align=\"absmiddle\" /></a> Crandall, S., N. Dahl, and T. Lardner. <em>An Intro. to the Mechanics of Solids</em>. New York, NY: McGraw-Hill, 1978. ISBN: 0070134367.</p> <p><a href=\"http://www.amazon.com/exec/obidos/ASIN/0534417930/ref=nosim/mitopencourse-20\"><img alt=\"Buy at Amazon\" src=\"/images/a_logo_17.gif\" border=\"0\" align=\"absmiddle\" /></a> Gere, James. <em>Mechanics of Materials</em>. 6th ed. New York, NY: Thomson Engineering Publishing,&nbsp;2003. ISBN: 0534417930.</p> <h2 class=\"subhead\">Grading</h2> <h3 class=\"subsubhead\">Quizzes 30%</h3> <p>There will be two one-hour, closed-book quizzes given during the semester.</p> <h3 class=\"subsubhead\">Design Exercises 40%</h3> <p>There will be six, short (~two, three day, take-home), open-ended exercises assigned throughout the semester. You will document your work in a journal (the Mead Composition book).</p> <h3 class=\"subsubhead\">Final Exam 30%</h3> <p>There will be a final exam.</p> <h2 class=\"subhead\">Homework</h2> <p>Homework will be assigned weekly, evaluated and returned to you (within a week). It will serve as a basis for discussion with the Teaching Assistant and Professor Bucciarelli.</p> <h2 class=\"subhead\">Design Exercise Journal Instructions</h2> <p>The journal, the quad-ruled composition book, 10 1/4 X 7 7/8 in, is for recording your work as you progress. Think of its contents, not as a polished text for presentation, nor as a complete record of every thought and word that comes to mind, but as a sufficiently full account of your thinking which would enable you to go back after some time has elapsed to reconstruct your reasoning, conjectures, and analysis. Write in ink. If you change your mind or find an error, don't erase; drawn a line through what is no longer wanted.</p> <p>Put your name, email, and phone number somewhere prominent; if lost, you want it returned. Leave the first few pages blank; make up a table of contents here as you go along. number the pages as you go along.</p> <p>At the end of each exercise, summarize, on one or two pages, the results of your efforts - e.g, a dimensioned sketch; an explanation of what parameters are critical; a restating of specifications; a note of difficult constraints.</p> <p>Two grades will be assigned for each exercise: One for &quot;presentation&quot;, the other for &quot;analysis&quot;. These two are not entirely independent. If your presentation is too cryptic or unreadable, evaluation of your analysis may be impossible and you will receive no credit. If your analysis omits references to sources - other students, a Web url, a reference textbook - your presentation will be judged inadequate and unethical. The two grades count equally.</p> <p>Think of it this way:</p> <p>Process is as important as product; means as important as ends.</p> <h2 class=\"subhead\">Important Note About Academic Honesty</h2> <p>We encourage you to work with your peers on homework and the design exercises. We do not condone copying. What is the difference? A valued and honest collaboration occurs when, for example, you &quot;get stuck&quot; early on in attacking an exercise and go to your classmate with a relevant question. Your colleague then has the opportunity to learn from your question as well as help you. You then bring something to the collaboration.</p> <p>Often we will form teams of two or three students to tackle the design exercises. And you can learn too from last year's problem sets and quizzes if used as a check or corrective when you seem to have hit a dead end. In doing the design exercises, you may have occasion to use the Web as a resource. We encourage that too. <strong>In all cases you are to reference your sources and collaborators, whether other students, the Web, archived solutions, etc.</strong></p>",
+            "short_url": "syllabus",
+            "type": "CourseSection",
+            "parent_uid": "a7f822e2259e077a9adce834b44d72d2",
+            "description": "The syllabus contains course objectives and list of materials for the course, along with the grading criteria."
+        }
+    
+        :param record: JSON record with course page data
+        :return: Contentful Entry for the course file 
+        """
+        metadata = self._prepare_metadata(
+            record, 
+            delete_fields=['uid'],
+            additional_metadata={
+                u"tracking_title": self._generate_tracking_title(courseware, record['title']),
+            },
+        )
+        # Pattern break - needed to rename field due to unknown issues with naming convention.
+        # Likely candidate for future refactor; requires changing content model in contentful.
+        metadata[u'course_page_type'] = metadata.pop('type')
+        return self.T.create_entry('course_page', record['uid'], metadata)
+
+    def create_course_file(self, record, courseware):
         """
         Example Course File.
         {
@@ -169,55 +204,20 @@ class Ocw2Contentful(object):
             "description": null
         }
     
-        :param cfrecord: JSON record with course file metadata (sparse)
-        :param parent_entry: contentful entry that will serve as a reference field (e.g., here we want to associate a course file with a course page) 
+        :param record: JSON record with course file metadata (sparse)
         :return: Contentful Entry for the course file 
         """
-        metadata = dict((k,cfrecord[k]) for k in cfrecord.keys() if isinstance(cfrecord[k], unicode)==True)
-        added_meta = {
-            u'tracking_title': self._generate_tracking_title(courseware, cfrecord['title']),
-            u'courseware': courseware,
-        }
-        metadata.update(added_meta)
-        for k in ['uid', 'caption', 'platform_requirements', 'parent_uid']:
-            if k in metadata:
-                del metadata[k]
-
-        return self.T.create_entry('course_file', cfrecord['uid'], metadata)
-
-    def _generate_tracking_title(self, courseware, title):
-        return u"{}.{} - {}".format(
-            courseware.fields()['department_number'], 
-            courseware.fields()['master_course_number'], 
-            title
+        metadata = self._prepare_metadata(
+            record, 
+            delete_fields=['uid', 'caption', 'platform_requirements'],
+            additional_metadata={
+                u"tracking_title": self._generate_tracking_title(courseware, record['title']),
+                u'courseware': courseware,
+            },
         )
+        return self.T.create_entry('course_file', record['uid'], metadata)
 
-    def _create_course_page(self, cprecord, courseware):
-        """
-        Example Course File.
-        {
-            "uid": "cbe32f43b1c1045bb68f4b3197ae3655",
-            "title": "Syllabus",
-            "url": "/courses/civil-and-environmental-engineering/1-050-solid-mechanics-fall-2004/syllabus",
-            "text": "<h2 class=\"subhead\">Course Meeting Times</h2> <p>Lectures: 3 sessions / week, 1 hour / session</p> <p>Labs: 2 sessions / week, 1 hour / session</p> <h3 class=\"subsubhead\">Course Introduction by Prof. Louis Bucciarelli</h3><p>65153023courseintroduction80419621</p><h2 class=\"subhead\">Objectives</h2> <p>The aim is to introduce students to the fundamental concepts and principles applied by engineers - whether civil, mechanical, aeronautical, etc.&nbsp;- in the design of structures of all sorts of sizes and purpose. We build upon the mathematics and physics courses of the freshman year, extending Newtonian Mechanics to address and understand the elastic behavior of trusses and frames, beams and cylinders. We aim also to engage students in the formulation and resolution of open-ended, design-type exercises, thereby bridging the divide between scientific theory and engineering practice.</p> <h2 class=\"subhead\">Textbook</h2> <p>Bucciarelli, Louis. <a href=\"http://store.doverpublications.com/0486468550.html\"><em>Engineering Mechanics for Structures</em></a>, Fall 2002. (The full text is published in the <a href=\"/courses/civil-and-environmental-engineering/1-050-solid-mechanics-fall-2004/readings\">readings section</a>.)</p> <p>Also required: Mead Quad Composition notebook.</p> <h2 class=\"subhead\">Other Resources</h2> <p><a href=\"http://www.amazon.com/exec/obidos/ASIN/0070134367/ref=nosim/mitopencourse-20\"><img alt=\"Buy at Amazon\" src=\"/images/a_logo_17.gif\" border=\"0\" align=\"absmiddle\" /></a> Crandall, S., N. Dahl, and T. Lardner. <em>An Intro. to the Mechanics of Solids</em>. New York, NY: McGraw-Hill, 1978. ISBN: 0070134367.</p> <p><a href=\"http://www.amazon.com/exec/obidos/ASIN/0534417930/ref=nosim/mitopencourse-20\"><img alt=\"Buy at Amazon\" src=\"/images/a_logo_17.gif\" border=\"0\" align=\"absmiddle\" /></a> Gere, James. <em>Mechanics of Materials</em>. 6th ed. New York, NY: Thomson Engineering Publishing,&nbsp;2003. ISBN: 0534417930.</p> <h2 class=\"subhead\">Grading</h2> <h3 class=\"subsubhead\">Quizzes 30%</h3> <p>There will be two one-hour, closed-book quizzes given during the semester.</p> <h3 class=\"subsubhead\">Design Exercises 40%</h3> <p>There will be six, short (~two, three day, take-home), open-ended exercises assigned throughout the semester. You will document your work in a journal (the Mead Composition book).</p> <h3 class=\"subsubhead\">Final Exam 30%</h3> <p>There will be a final exam.</p> <h2 class=\"subhead\">Homework</h2> <p>Homework will be assigned weekly, evaluated and returned to you (within a week). It will serve as a basis for discussion with the Teaching Assistant and Professor Bucciarelli.</p> <h2 class=\"subhead\">Design Exercise Journal Instructions</h2> <p>The journal, the quad-ruled composition book, 10 1/4 X 7 7/8 in, is for recording your work as you progress. Think of its contents, not as a polished text for presentation, nor as a complete record of every thought and word that comes to mind, but as a sufficiently full account of your thinking which would enable you to go back after some time has elapsed to reconstruct your reasoning, conjectures, and analysis. Write in ink. If you change your mind or find an error, don't erase; drawn a line through what is no longer wanted.</p> <p>Put your name, email, and phone number somewhere prominent; if lost, you want it returned. Leave the first few pages blank; make up a table of contents here as you go along. number the pages as you go along.</p> <p>At the end of each exercise, summarize, on one or two pages, the results of your efforts - e.g, a dimensioned sketch; an explanation of what parameters are critical; a restating of specifications; a note of difficult constraints.</p> <p>Two grades will be assigned for each exercise: One for &quot;presentation&quot;, the other for &quot;analysis&quot;. These two are not entirely independent. If your presentation is too cryptic or unreadable, evaluation of your analysis may be impossible and you will receive no credit. If your analysis omits references to sources - other students, a Web url, a reference textbook - your presentation will be judged inadequate and unethical. The two grades count equally.</p> <p>Think of it this way:</p> <p>Process is as important as product; means as important as ends.</p> <h2 class=\"subhead\">Important Note About Academic Honesty</h2> <p>We encourage you to work with your peers on homework and the design exercises. We do not condone copying. What is the difference? A valued and honest collaboration occurs when, for example, you &quot;get stuck&quot; early on in attacking an exercise and go to your classmate with a relevant question. Your colleague then has the opportunity to learn from your question as well as help you. You then bring something to the collaboration.</p> <p>Often we will form teams of two or three students to tackle the design exercises. And you can learn too from last year's problem sets and quizzes if used as a check or corrective when you seem to have hit a dead end. In doing the design exercises, you may have occasion to use the Web as a resource. We encourage that too. <strong>In all cases you are to reference your sources and collaborators, whether other students, the Web, archived solutions, etc.</strong></p>",
-            "short_url": "syllabus",
-            "type": "CourseSection",
-            "parent_uid": "a7f822e2259e077a9adce834b44d72d2",
-            "description": "The syllabus contains course objectives and list of materials for the course, along with the grading criteria."
-        }
-    
-        :param cprecord: JSON record with course file metadata (sparse)
-        :return: Contentful Entry for the course file 
-        """
-        metadata = dict((k,cprecord[k]) for k in cprecord.keys() if isinstance(cprecord[k], unicode)==True)
-        metadata['tracking_title'] = self._generate_tracking_title(courseware, cprecord['title'])
-        for k in ['uid']:
-            del metadata[k]
-
-        metadata['course_page_type'] = metadata.pop('type')
-        return self.T.create_entry('course_page', cprecord['uid'], metadata)
-
-    def _create_course_embedded_media(self, emrecord, courseware):
+    def create_course_embedded_media(self, record, courseware):
         """
             "course_embedded_media": {
                 "65153023courseintroduction80419621": {
@@ -253,13 +253,15 @@ class Ocw2Contentful(object):
                 }
             },
         """
-        metadata = dict((k,emrecord[k]) for k in emrecord.keys() if isinstance(emrecord[k], unicode)==True)
-        added_meta = {
-            u'tracking_title': self._generate_tracking_title(courseware, emrecord['title']),
-            u'courseware': [courseware],
-        }
-        metadata.update(added_meta)
-        return self.T.create_entry('embedded_media', emrecord['uid'], metadata)
+        metadata = self._prepare_metadata(
+            record, 
+            delete_fields=['embedded_media'],
+            additional_metadata={
+                u"tracking_title": self._generate_tracking_title(courseware, record['title']),
+                u'courseware': [courseware],
+            },
+        )
+        return self.T.create_entry('embedded_media', record['uid'], metadata)
 
     def add_courseware(self, ocw_url):
         """
@@ -269,83 +271,64 @@ class Ocw2Contentful(object):
         record = self.get_courseware_metadata(ocw_url)
 
         #Step 1: create the basic metadata for a courseware entry in Contentful
-        courseware = self._create_courseware(record)
+        courseware = self.create_courseware(record)
 
         #Step 2: add department
-        department = self._create_department(self.departments[record['department_number']])
+        department = self.create_department(self.departments_by_num[record['department_number']])
         courseware.department = [department]
         courseware.save()
 
         #Step 3: iterate over the faculty list; create if does not exist, link to courseware
-        flinks = []
-        for f in record['instructors']:
-            flinks.append(self._create_instructor(f))
-        
-        courseware.instructors = [fl for fl in flinks] # Update new_courseware with faculty clinks
+        courseware.instructors = [self.create_instructor(f, courseware) for f in record['instructors']] 
         courseware.save()
 
         #Step 4: iterate through course tags and attach to courseware
-        tlinks = []
-        for t in record['tags']:
-            t['name'] = t['name']#.encode("utf8","ignore")
-            tlinks.append(self._create_tag(t))
-
-        courseware.tags = [tl for tl in tlinks] # Update new_courseware with tag clinks
+        courseware.tags = [self.create_tag(t) for t in record['tags']] # Update new_courseware with tag clinks
         courseware.save()
 
         #Step 5: iterate through course pages and attach to courseware
-        cplinks = []
-        for cp in record['course_pages']:
-            cplinks.append(self._create_course_page(cp, courseware))
-
-        courseware.course_pages = [cpl for cpl in cplinks]
+        courseware.course_pages = [self.create_course_page(cp, courseware) for cp in record['course_pages']]
         courseware.save()
 
-        #Step 6: iterate through course files and attach courseware
-        cflinks = defaultdict(list)
-        allcflinks = []
-        for cf in record['course_files'][0:30]:
-            tmp_cf = self._create_course_file(cf, courseware)
-            cflinks[cf['parent_uid']].append(tmp_cf)
-            allcflinks.append(tmp_cf)
+        #Step 6: iterate through course files, create them, then go back and add them to each course page
+        page_links = defaultdict(list)
+        for cf in record['course_files']:
+            page_links[cf['parent_uid']].append(self.create_course_file(cf, courseware))
 
-        courseware.course_files = allcflinks
+        # Link all files
+        courseware.course_files = list(set(j for i in page_links for j in page_links[i])) #Grabbing unique entries 
         courseware.save()
 
-        for key in cflinks:
+        # Link to specific course pages
+        for key in page_links:
             try:
+                # print(key, page_links[key])
                 course_page = client.entries(sid, eid).find(key)
-                course_page.files = cflinks[key]
+                course_page.files = page_links[key]
                 course_page.save()
-            except:
-                print("Page not found: {}".format(key))
-            
-        # courseware.course_files = [cfl for cfl in cflinks] # Update new_courseware with course file clinks
-        # courseware.save()
+                print("Added {} files to {} page.".format(len(page_links[key]), key))
+            except Exception as e:
+                print("Issue saving entries to course pages: {}".format(key))
+                print(e)
 
         #Step 7: iterate through embedded media, create entries, and attach to course page 
-        emlinks = defaultdict(list)
+        em_links = defaultdict(list)
         for key in record['course_embedded_media']:
             page = record['course_embedded_media'][key]
             em = {r['id']: r['media_info'][0:200] for r in page['embedded_media'] if r["id"]=="Video-YouTube-Stream"}
             page.update(em)
             page['technical_location'] = page['technical_location'][0:250]
-            del page['embedded_media']
-            emlinks[page['parent_uid']].append(self._create_course_embedded_media(page, courseware))
+            em_links[page['parent_uid']].append(self.create_course_embedded_media(page, courseware))
 
-        for key in emlinks:
+        for key in em_links:
             try:
                 course_page = client.entries(sid, eid).find(key)
-                course_page.files = emlinks[key]
+                course_page.files = em_links[key]
                 course_page.save()
-            except:
-                print("Page not found: {}".format(key))
-
-        # #Step 8: associate files and media with specific course pages
-        # for key in cflinks:
-        #     course_page = client.entries(sid, eid).find(key)
-        #     course_page.files = cflinks[key]
-        #     course_page.save()
+                print("Added {} files to {} page.".format(len(em_links[key]), key))
+            except Exception as e:
+                print("Issue saving media to course pages: {}".format(key))
+                print(e)
 
         return courseware
 
@@ -366,9 +349,15 @@ if __name__ == "__main__":
     # url = 'https://ocw.mit.edu/courses/biology/7-13-experimental-microbial-genetics-fall-2008/'
     # url = 'https://ocw.mit.edu/courses/physics/8-591j-systems-biology-fall-2014/'
     # url = 'https://ocw.mit.edu/courses/materials-science-and-engineering/3-024-electronic-optical-and-magnetic-properties-of-materials-spring-2013/'
-    url = 'https://ocw.mit.edu/courses/physics/8-06-quantum-physics-iii-spring-2005/'
+    
+    ### Rapid Feedback from Krishna
+    # url = 'https://ocw.mit.edu/courses/physics/8-06-quantum-physics-iii-spring-2005/'
+    
+    ### Educator and Scholar Course
+    # url = 'https://ocw.mit.edu/courses/chemistry/5-111sc-principles-of-chemical-science-fall-2014'
     c = OCW.add_courseware(url)
     print("Success creating courseware: {}".format(c))
+
 
     # OCW = Ocw2Contentful()
     # counter = 0

@@ -16,6 +16,36 @@ class Translate(object):
         self.content_types_client = self.client.content_types(secure.SPACE_ID, secure.ENVIRONMENT_ID)
         return None
     
+    def new_create_entry(self, content_type_name, entry_uid, entry_attributes):
+        """
+        Return a Contentful Entry from OCW input data. If entry exists, returns Entry without creating or updating.   
+        For non-existent Entries, metadata are added based on their types and found in the _set_field_type function.
+        unicode: text field
+        contentful class: single reference field
+        list: multi-reference field
+        
+        When calling create_entry(), provide the following parameters:
+
+        :param content_type_name: str used to identify Contentful content_type. Convention: {content_type_name}_type.
+        :param entry_uid: the entry's unique Contentful ID (we attempt to use OCW UIDs as much as possible).
+        :param entry_attributes: dict containing metadata that will be mapped to Contentful.
+        :param force_creation: default None, intended to force creation when needing to change/update an existing Entry.
+        :return: Contentful Entry object.
+        """
+
+        # Return the entry if the entry_uid already exists in Contentul 
+        try:
+            return self.entries_client.find(entry_uid)
+        except:
+            # print(type(content_type_name), type(str(entry_uid.encode)))
+            print "Creating {}: {}".format(content_type_name, entry_uid)
+        
+        # Create the entry and return 
+        return self.entries_client.create(
+            entry_uid, 
+            getattr(self, content_type_name)(entry_attributes) # naming convention required
+        )
+
     def create_entry(self, content_type_name, entry_uid, entry_attributes):
         """
         Generalizing the entry creation process for OCW to Contentful. 
@@ -38,17 +68,6 @@ class Translate(object):
             entry_uid, 
             getattr(self, content_type_name)(entry_attributes) # naming convention required
         )
-
-    def mediaResource(self, lookup):
-        return {
-            'content_type_id': 'mediaResource',
-            'fields': {
-                'path': self._text_field(lookup['path']),
-                'title': self._text_field(lookup['title']),
-                'youTubeId': self._text_field(lookup['youtube_id']),
-                'courseware': self._multi_reference_field([lookup['courseware']]),
-            }
-        }
 
     def courseware(self, entry_attributes):
         return { 
