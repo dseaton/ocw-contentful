@@ -14,7 +14,8 @@ client = contentful_management.Client(secure.MANAGEMENT_API_TOKEN)
 sid = secure.SPACE_ID
 eid = secure.ENVIRONMENT_ID
 
-class Ocw2Contentful(object):        
+
+class Ocw2Contentful(object):
     def __init__(self):
         """
         :param bucket: s3 bucket containing OCW data organized by course.
@@ -99,7 +100,7 @@ class Ocw2Contentful(object):
         :param record: dict, with fields shown above
         """
         metadata = self._prepare_metadata(
-            record, 
+            record,
             delete_fields=None,
             additional_metadata=None,
         )
@@ -126,12 +127,13 @@ class Ocw2Contentful(object):
         """
         ### Pattern Break: faculty listed by school, rather than department (e.g., School of Engineering)
         if record['department'] in self.departments_by_title:
-            department_entry = self.create_department(self.departments_by_title[record['department']])
+            department_entry = self.create_department(
+                self.departments_by_title[record['department']])
         else:
             department_entry = None
-        
+
         metadata = self._prepare_metadata(
-            record, 
+            record,
             delete_fields=['uid', 'mit_id', 'department'],
             additional_metadata={'department': [department_entry]},
         )
@@ -151,7 +153,7 @@ class Ocw2Contentful(object):
         :param record: JSON record with tag metadata 
         :return: Contentful Entry for the tag 
         """
-        uid = self._make_camel(record['name'][0:64]) # contentful uids only 64 char long
+        uid = self._make_camel(record['name'][0:64])  # contentful uids max 64 char
         metadata = self._prepare_metadata(
             record, 
             delete_fields=None,
@@ -177,7 +179,7 @@ class Ocw2Contentful(object):
         :return: Contentful Entry for the course file 
         """
         metadata = self._prepare_metadata(
-            record, 
+            record,
             delete_fields=['uid'],
             additional_metadata={
                 u"tracking_title": self._generate_tracking_title(courseware, record['title']),
@@ -208,7 +210,7 @@ class Ocw2Contentful(object):
         :return: Contentful Entry for the course file 
         """
         metadata = self._prepare_metadata(
-            record, 
+            record,
             delete_fields=['uid', 'caption', 'platform_requirements'],
             additional_metadata={
                 u"tracking_title": self._generate_tracking_title(courseware, record['title']),
@@ -254,7 +256,7 @@ class Ocw2Contentful(object):
             },
         """
         metadata = self._prepare_metadata(
-            record, 
+            record,
             delete_fields=['embedded_media'],
             additional_metadata={
                 u"tracking_title": self._generate_tracking_title(courseware, record['title']),
@@ -274,29 +276,35 @@ class Ocw2Contentful(object):
         courseware = self.create_courseware(record)
 
         #Step 2: add department
-        department = self.create_department(self.departments_by_num[record['department_number']])
+        department = self.create_department(
+            self.departments_by_num[record['department_number']])
         courseware.department = [department]
         courseware.save()
 
         #Step 3: iterate over the faculty list; create if does not exist, link to courseware
-        courseware.instructors = [self.create_instructor(f, courseware) for f in record['instructors']] 
+        courseware.instructors = [self.create_instructor(
+            f, courseware) for f in record['instructors']]
         courseware.save()
 
         #Step 4: iterate through course tags and attach to courseware
-        courseware.tags = [self.create_tag(t) for t in record['tags']] # Update new_courseware with tag clinks
+        # Update new_courseware with tag clinks
+        courseware.tags = [self.create_tag(t) for t in record['tags']]
         courseware.save()
 
         #Step 5: iterate through course pages and attach to courseware
         courseware.course_pages = [self.create_course_page(cp, courseware) for cp in record['course_pages']]
+        print([p.sys['id'] for p in courseware.course_pages])
         courseware.save()
 
         #Step 6: iterate through course files, create them, then go back and add them to each course page
         page_links = defaultdict(list)
         for cf in record['course_files']:
-            page_links[cf['parent_uid']].append(self.create_course_file(cf, courseware))
+            page_links[cf['parent_uid']].append(
+                self.create_course_file(cf, courseware))
 
         # Link all files
-        courseware.course_files = list(set(j for i in page_links for j in page_links[i])) #Grabbing unique entries 
+        courseware.course_files = list(
+            set(j for i in page_links for j in page_links[i]))  # Grabbing unique entries
         courseware.save()
 
         # Link to specific course pages
@@ -306,26 +314,30 @@ class Ocw2Contentful(object):
                 course_page = client.entries(sid, eid).find(key)
                 course_page.files = page_links[key]
                 course_page.save()
-                print("Added {} files to {} page.".format(len(page_links[key]), key))
+                print("Added {} files to {} page.".format(
+                    len(page_links[key]), key))
             except Exception as e:
                 print("Issue saving entries to course pages: {}".format(key))
                 print(e)
 
-        #Step 7: iterate through embedded media, create entries, and attach to course page 
+        #Step 7: iterate through embedded media, create entries, and attach to course page
         em_links = defaultdict(list)
         for key in record['course_embedded_media']:
             page = record['course_embedded_media'][key]
-            em = {r['id']: r['media_info'][0:200] for r in page['embedded_media'] if r["id"]=="Video-YouTube-Stream"}
+            em = {r['id']: r['media_info'][0:200]
+                  for r in page['embedded_media'] if r["id"] == "Video-YouTube-Stream"}
             page.update(em)
             page['technical_location'] = page['technical_location'][0:250]
-            em_links[page['parent_uid']].append(self.create_course_embedded_media(page, courseware))
+            em_links[page['parent_uid']].append(
+                self.create_course_embedded_media(page, courseware))
 
         for key in em_links:
             try:
                 course_page = client.entries(sid, eid).find(key)
                 course_page.files = em_links[key]
                 course_page.save()
-                print("Added {} files to {} page.".format(len(em_links[key]), key))
+                print("Added {} files to {} page.".format(
+                    len(em_links[key]), key))
             except Exception as e:
                 print("Issue saving media to course pages: {}".format(key))
                 print(e)
@@ -354,18 +366,19 @@ if __name__ == "__main__":
     # url = 'https://ocw.mit.edu/courses/physics/8-06-quantum-physics-iii-spring-2005/'
     
     ### Educator and Scholar Course
-    # url = 'https://ocw.mit.edu/courses/chemistry/5-111sc-principles-of-chemical-science-fall-2014'
+    url = 'https://ocw.mit.edu/courses/chemistry/5-111sc-principles-of-chemical-science-fall-2014'
+    url = 'https://ocw.mit.edu/courses/mechanical-engineering/2-087-engineering-math-differential-equations-and-linear-algebra-fall-2014'
     c = OCW.add_courseware(url)
     print("Success creating courseware: {}".format(c))
 
 
     # OCW = Ocw2Contentful()
     # counter = 0
-    # for k,v in OCW.departments.iteritems():
+    # for k,v in OCW.departments_by_num.iteritems():
     #     if counter < 10: 
     #         dept_url = "https://ocw.mit.edu/courses/{}/{}.json".format(v['id'], v['id'])
     #         dept_data = json.loads(urllib.urlopen(dept_url).read())
-    #         course_record = dept_data[2]
+    #         course_record = dept_data[4]
     #         course_url = course_record[course_record.keys()[0]]['course_path']
     #         print("Parsing: {}".format(course_url))
     #         c = OCW.add_courseware(course_url)

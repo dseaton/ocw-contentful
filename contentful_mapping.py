@@ -117,7 +117,7 @@ class Translate(object):
         elif isinstance(v, contentful_management.entry.Entry):
             return self._single_reference_field(v.sys['id'])
         elif isinstance(v, list):
-            return self._multi_reference_field([l.sys['id'] for l in v])
+            return self._multi_reference_field([l.sys['id'] for l in v if l])
         else:
             return None
 
