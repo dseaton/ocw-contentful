@@ -4,6 +4,7 @@ import json
 import urllib
 
 import boto3
+from BeautifulSoup import BeautifulSoup
 import contentful_management
 
 from contentful_mapping import Translate
@@ -56,6 +57,19 @@ class Ocw2Contentful(object):
             courseware.fields()['master_course_number'], 
             title
         )
+
+    def _clean_html(self, html):
+        soup = BeautifulSoup(html)
+        for tag in soup():
+            for attribute in ["class", "id", "name", "style"]:
+                del tag[attribute]
+
+        for link_tag in soup.findAll('a'):
+            print(link_tag["href"])
+            if "/courses/" in link_tag["href"]:
+                link_tag["href"] = "https://ocw.mit.edu/" + link_tag["href"]
+
+        return soup
 
     def _prepare_metadata(self, record, delete_fields=None, additional_metadata=None):
         metadata = dict((k,record[k]) for k in record.keys() if isinstance(record[k], unicode)==True)
@@ -183,6 +197,7 @@ class Ocw2Contentful(object):
             delete_fields=['uid'],
             additional_metadata={
                 u"tracking_title": self._generate_tracking_title(courseware, record['title']),
+                u"clean_text": self._clean_text(record['text']),
             },
         )
         # Pattern break - needed to rename field due to unknown issues with naming convention.
@@ -275,26 +290,26 @@ class Ocw2Contentful(object):
         #Step 1: create the basic metadata for a courseware entry in Contentful
         courseware = self.create_courseware(record)
 
-        #Step 2: add department
-        department = self.create_department(
-            self.departments_by_num[record['department_number']])
-        courseware.department = [department]
-        courseware.save()
+        # #Step 2: add department
+        # department = self.create_department(
+        #     self.departments_by_num[record['department_number']])
+        # courseware.department = [department]
+        # courseware.save()
 
-        #Step 3: iterate over the faculty list; create if does not exist, link to courseware
-        courseware.instructors = [self.create_instructor(
-            f, courseware) for f in record['instructors']]
-        courseware.save()
+        # #Step 3: iterate over the faculty list; create if does not exist, link to courseware
+        # courseware.instructors = [self.create_instructor(
+        #     f, courseware) for f in record['instructors']]
+        # courseware.save()
 
-        #Step 4: iterate through course tags and attach to courseware
-        # Update new_courseware with tag clinks
-        courseware.tags = [self.create_tag(t) for t in record['tags']]
-        courseware.save()
+        # #Step 4: iterate through course tags and attach to courseware
+        # # Update new_courseware with tag clinks
+        # courseware.tags = [self.create_tag(t) for t in record['tags']]
+        # courseware.save()
 
-        #Step 5: iterate through course pages and attach to courseware
-        courseware.course_pages = [self.create_course_page(cp, courseware) for cp in record['course_pages']]
-        print([p.sys['id'] for p in courseware.course_pages])
-        courseware.save()
+        # #Step 5: iterate through course pages and attach to courseware
+        # courseware.course_pages = [self.create_course_page(cp, courseware) for cp in record['course_pages']]
+        # print([p.sys['id'] for p in courseware.course_pages])
+        # courseware.save()
 
         #Step 6: iterate through course files, create them, then go back and add them to each course page
         page_links = defaultdict(list)
@@ -302,45 +317,45 @@ class Ocw2Contentful(object):
             page_links[cf['parent_uid']].append(
                 self.create_course_file(cf, courseware))
 
-        # Link all files
-        courseware.course_files = list(
-            set(j for i in page_links for j in page_links[i]))  # Grabbing unique entries
-        courseware.save()
+        # # Link all files
+        # courseware.course_files = list(
+        #     set(j for i in page_links for j in page_links[i]))  # Grabbing unique entries
+        # courseware.save()
 
-        # Link to specific course pages
-        for key in page_links:
-            try:
-                # print(key, page_links[key])
-                course_page = client.entries(sid, eid).find(key)
-                course_page.files = page_links[key]
-                course_page.save()
-                print("Added {} files to {} page.".format(
-                    len(page_links[key]), key))
-            except Exception as e:
-                print("Issue saving entries to course pages: {}".format(key))
-                print(e)
+        # # Link to specific course pages
+        # for key in page_links:
+        #     try:
+        #         # print(key, page_links[key])
+        #         course_page = client.entries(sid, eid).find(key)
+        #         course_page.files = page_links[key]
+        #         course_page.save()
+        #         print("Added {} files to {} page.".format(
+        #             len(page_links[key]), key))
+        #     except Exception as e:
+        #         print("Issue saving entries to course pages: {}".format(key))
+        #         print(e)
 
-        #Step 7: iterate through embedded media, create entries, and attach to course page
-        em_links = defaultdict(list)
-        for key in record['course_embedded_media']:
-            page = record['course_embedded_media'][key]
-            em = {r['id']: r['media_info'][0:200]
-                  for r in page['embedded_media'] if r["id"] == "Video-YouTube-Stream"}
-            page.update(em)
-            page['technical_location'] = page['technical_location'][0:250]
-            em_links[page['parent_uid']].append(
-                self.create_course_embedded_media(page, courseware))
+        # #Step 7: iterate through embedded media, create entries, and attach to course page
+        # em_links = defaultdict(list)
+        # for key in record['course_embedded_media']:
+        #     page = record['course_embedded_media'][key]
+        #     em = {r['id']: r['media_info'][0:200]
+        #           for r in page['embedded_media'] if r["id"] == "Video-YouTube-Stream"}
+        #     page.update(em)
+        #     page['technical_location'] = page['technical_location'][0:250]
+        #     em_links[page['parent_uid']].append(
+        #         self.create_course_embedded_media(page, courseware))
 
-        for key in em_links:
-            try:
-                course_page = client.entries(sid, eid).find(key)
-                course_page.files = em_links[key]
-                course_page.save()
-                print("Added {} files to {} page.".format(
-                    len(em_links[key]), key))
-            except Exception as e:
-                print("Issue saving media to course pages: {}".format(key))
-                print(e)
+        # for key in em_links:
+        #     try:
+        #         course_page = client.entries(sid, eid).find(key)
+        #         course_page.files = em_links[key]
+        #         course_page.save()
+        #         print("Added {} files to {} page.".format(
+        #             len(em_links[key]), key))
+        #     except Exception as e:
+        #         print("Issue saving media to course pages: {}".format(key))
+        #         print(e)
 
         return courseware
 
@@ -352,7 +367,7 @@ if __name__ == "__main__":
     from pprint import pprint
     import urllib
 
-    OCW = Ocw2Contentful()
+    
     # url = 'https://ocw.mit.edu/courses/aeronautics-and-astronautics/16-01-unified-engineering-i-ii-iii-iv-fall-2005-spring-2006/'
     # url = 'https://ocw.mit.edu/courses/physics/8-01sc-classical-mechanics-fall-2016/'
     # url = 'https://ocw.mit.edu/courses/civil-and-environmental-engineering/1-050-solid-mechanics-fall-2004'
@@ -363,13 +378,97 @@ if __name__ == "__main__":
     # url = 'https://ocw.mit.edu/courses/materials-science-and-engineering/3-024-electronic-optical-and-magnetic-properties-of-materials-spring-2013/'
     
     ### Rapid Feedback from Krishna
-    # url = 'https://ocw.mit.edu/courses/physics/8-06-quantum-physics-iii-spring-2005/'
+    url = 'https://ocw.mit.edu/courses/physics/8-06-quantum-physics-iii-spring-2005/'
     
     ### Educator and Scholar Course
-    url = 'https://ocw.mit.edu/courses/chemistry/5-111sc-principles-of-chemical-science-fall-2014'
-    url = 'https://ocw.mit.edu/courses/mechanical-engineering/2-087-engineering-math-differential-equations-and-linear-algebra-fall-2014'
-    c = OCW.add_courseware(url)
-    print("Success creating courseware: {}".format(c))
+    # url = 'https://ocw.mit.edu/courses/chemistry/5-111sc-principles-of-chemical-science-fall-2014'
+    # url = 'https://ocw.mit.edu/courses/mechanical-engineering/2-087-engineering-math-differential-equations-and-linear-algebra-fall-2014'
+    
+    ### Eliz Request 6.033
+    # url = 'https://ocw.mit.edu/courses/electrical-engineering-and-computer-science/6-033-computer-system-engineering-spring-2018/'
+    
+    # OCW = Ocw2Contentful()
+    # c = OCW.add_courseware(url)
+    # print("Success creating courseware: {}".format(c))
+
+    OCW = Ocw2Contentful()
+    text = """
+        <p>Some Topics have a related experiment in the class <em>8.13-8.14: Experimental Physics I &amp; II &quot;Junior Lab,&quot;</em> which is usually taken concurrently with Quantum Physics III.</p>
+            <div class="maintabletemplate">
+            <table summary="See table caption for summary.">
+                <caption class="invisible">Related resources table.</caption>
+                <thead>
+                    <tr>
+                        <th scope="col">LEC&nbsp;#</th>
+                        <th scope="col">TOPICS</th>
+                        <th scope="col">RELATED&nbsp;EXPERIMENTS</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="row">
+                        <td>1</td>
+                        <td>Natural Units</td>
+                        <td>&nbsp;</td>
+                    </tr>
+                    <tr class="alt-row">
+                        <td>2-4</td>
+                        <td>Degenerate Fermi Systems</td>
+                        <td>&nbsp;</td>
+                    </tr>
+                    <tr class="row">
+                        <td>4-8</td>
+                        <td>Charged Particles in a Magnetic Field</td>
+                        <td>&nbsp;</td>
+                    </tr>
+                    <tr class="alt-row">
+                        <td>9-12</td>
+                        <td>Time-independent Perturbation Theory</td>
+                        <td>
+                        <p><a href="/courses/physics/8-13-14-experimental-physics-i-ii-junior-lab-fall-2007-spring-2008/labs/lab11">Optical Emission Spectra of Hydrogenic Atoms</a></p>
+                        <p><a href="/courses/physics/8-13-14-experimental-physics-i-ii-junior-lab-fall-2007-spring-2008/labs/lab15">21-cm Radio Astrophysics</a></p>
+                        <p><a href="/courses/physics/8-13-14-experimental-physics-i-ii-junior-lab-fall-2007-spring-2008/labs/lab16">The Zeeman Effect</a></p>
+                        <p><a href="/courses/physics/8-13-14-experimental-physics-i-ii-junior-lab-fall-2007-spring-2008/labs/lab17">Optical Pumping of Rubidium Vapor</a></p>
+                        <p><a href="/courses/physics/8-13-14-experimental-physics-i-ii-junior-lab-fall-2007-spring-2008/labs/lab19">X-Ray Physics</a></p>
+                        <p><a href="/courses/physics/8-13-14-experimental-physics-i-ii-junior-lab-fall-2007-spring-2008/labs/lab21">Doppler-Free Laser Spectroscopy</a></p>
+                        </td>
+                    </tr>
+                    <tr class="row">
+                        <td>13-15</td>
+                        <td>Variational and Semi-classical Methods</td>
+                        <td><a href="/courses/physics/8-13-14-experimental-physics-i-ii-junior-lab-fall-2007-spring-2008/labs/lab20">Superconductivity</a></td>
+                    </tr>
+                    <tr class="alt-row">
+                        <td>16-18</td>
+                        <td>The Adiabatic Approximation and Berry's Phase</td>
+                        <td>&nbsp;</td>
+                    </tr>
+                    <tr class="row">
+                        <td>19-23</td>
+                        <td>Scattering</td>
+                        <td>
+                        <p><a href="/courses/physics/8-13-14-experimental-physics-i-ii-junior-lab-fall-2007-spring-2008/labs/lab6">The Franck-Hertz Experiment</a></p>
+                        <p><a href="/courses/physics/8-13-14-experimental-physics-i-ii-junior-lab-fall-2007-spring-2008/labs/lab10">Rutherford Scattering</a></p>
+                        </td>
+                    </tr>
+                    <tr class="alt-row">
+                        <td>23-24</td>
+                        <td>Time-dependent Perturbation Theory</td>
+                        <td>
+                        <p><a href="/courses/physics/8-13-14-experimental-physics-i-ii-junior-lab-fall-2007-spring-2008/labs/lab17">Optical Pumping of Rubidium Vapor</a>&nbsp;</p>
+                        <p><a href="/courses/physics/8-13-14-experimental-physics-i-ii-junior-lab-fall-2007-spring-2008/labs/lab21">Doppler-Free Laser Spectroscopy</a></p>
+                        </td>
+                    </tr>
+                    <tr class="row">
+                        <td>25</td>
+                        <td>Quantum Computing</td>
+                        <td><a href="/courses/physics/8-13-14-experimental-physics-i-ii-junior-lab-fall-2007-spring-2008/labs/lab22">Quantum Information Processing with NMR</a></td>
+                    </tr>
+                </tbody>
+            </table>
+            </div>
+    """
+    from pprint import pprint
+    OCW._clean_html(text)
 
 
     # OCW = Ocw2Contentful()
