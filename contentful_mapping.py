@@ -16,6 +16,36 @@ class Translate(object):
         self.content_types_client = self.client.content_types(secure.SPACE_ID, secure.ENVIRONMENT_ID)
         return None
     
+    def new_create_entry(self, content_type_name, entry_uid, entry_attributes):
+        """
+        Return a Contentful Entry from OCW input data. If entry exists, returns Entry without creating or updating.   
+        For non-existent Entries, metadata are added based on their types and found in the _set_field_type function.
+        unicode: text field
+        contentful class: single reference field
+        list: multi-reference field
+        
+        When calling create_entry(), provide the following parameters:
+
+        :param content_type_name: str used to identify Contentful content_type. Convention: {content_type_name}_type.
+        :param entry_uid: the entry's unique Contentful ID (we attempt to use OCW UIDs as much as possible).
+        :param entry_attributes: dict containing metadata that will be mapped to Contentful.
+        :param force_creation: default None, intended to force creation when needing to change/update an existing Entry.
+        :return: Contentful Entry object.
+        """
+
+        # Return the entry if the entry_uid already exists in Contentul 
+        try:
+            return self.entries_client.find(entry_uid)
+        except:
+            # print(type(content_type_name), type(str(entry_uid.encode)))
+            print "Creating {}: {}".format(content_type_name, entry_uid)
+        
+        # Create the entry and return 
+        return self.entries_client.create(
+            entry_uid, 
+            getattr(self, content_type_name)(entry_attributes) # naming convention required
+        )
+
     def create_entry(self, content_type_name, entry_uid, entry_attributes):
         """
         Generalizing the entry creation process for OCW to Contentful. 
@@ -30,98 +60,72 @@ class Translate(object):
         try:
             return self.entries_client.find(entry_uid)
         except:
-            print("Creating {}: {}".format(content_type_name, entry_uid))
+            # print(type(content_type_name), type(str(entry_uid.encode)))
+            print "Creating {}: {}".format(content_type_name, entry_uid)
         
         # Create the entry and return 
         return self.entries_client.create(
             entry_uid, 
             getattr(self, content_type_name)(entry_attributes) # naming convention required
         )
-    
-    def pdfResource(self, lookup):
-        return {
-            'content_type_id': 'pdfResource',
-            'fields': {
-                'courseware': self._multi_reference_field([lookup['courseware']]),
-                'path': self._text_field(lookup['path']),
-                'subtopic': self._multi_reference_field([lookup['subtopic']]),
-                'trackingTitle': self._text_field(lookup['tracking_title']),
-                'pdfType': self._text_field(lookup['pdf_type']),
-            }
-        }
 
-    def mediaResource(self, lookup):
-        return {
-            'content_type_id': 'mediaResource',
-            'fields': {
-                'path': self._text_field(lookup['path']),
-                'title': self._text_field(lookup['title']),
-                'youTubeId': self._text_field(lookup['youtube_id']),
-                'courseware': self._multi_reference_field([lookup['courseware']]),
-            }
-        }
-
-    def topic(self, lookup):
-        return {
-            'content_type_id': 'topic',
-            'fields': {
-                'title': self._text_field(lookup['title']),
-            }
-        }
-
-    def subtopic(self, lookup):
-        return {
-            'content_type_id': 'subtopic',
-            'fields': {
-                'title': self._text_field(lookup['title']),
-            }
-        }
-
-    def speciality(self, lookup):
-        return {
-            'content_type_id': 'speciality',
-            'fields': {
-                'title': self._text_field(lookup['title']),
-            }
-        }
-
-    def autoInstructor(self, lookup):
+    def courseware(self, entry_attributes):
         return { 
-            'content_type_id': 'autoInstructor',
-            'fields': {
-                'name': self._text_field(lookup['name']),
-                'title': self._text_field(lookup['title']),
-                'department': self._multi_reference_field([lookup['department_clink_id']]),
-                'bio': None,
-                'courseware': None,
-            }
+            'content_type_id': 'courseware',
+            'fields': {self.to_camel_case(e): self._set_field_type(v) for e,v in entry_attributes.iteritems()}
+        }
+
+    def instructor(self, entry_attributes):
+        return { 
+            'content_type_id': 'instructor',
+            'fields': {self.to_camel_case(e): self._set_field_type(v) for e,v in entry_attributes.iteritems()}
         }
     
-    def autoCourseware(self, lookup):
-        return { #[faculty for faculty in course_info['faculty']]
-            'content_type_id': 'autoCourseware',
-            'fields': {
-                'trackingTitle': self._text_field(lookup['tracking_title']),
-                'courseTitle': self._text_field(lookup['course_title']),
-                'courseImage': None,
-                'courseImagePath': self._text_field(lookup['course_image_path']),
-                'department': self._multi_reference_field([lookup['department_clink_id']]),
-                'description': None,
-                'plainTextDescription': self._text_field(lookup['description']),
-                'courseUid': self._text_field(lookup['course_uid']),
-                'term': self._text_field(lookup['term']),
-                'year': self._text_field(lookup['year']),
-                'level': self._text_field(lookup['level']),
-                'masterCourseNumber': self._text_field(lookup['master_course_number']),
-                'coursePath': self._text_field(lookup['course_path']),
-                'instructors': None,
-                'keywords': None,
-                'mediaResources': None,
-            }
+    def tag(self, entry_attributes):
+        return {
+            'content_type_id': 'tag',
+            'fields': {self.to_camel_case(e): self._set_field_type(v) for e,v in entry_attributes.iteritems()}
         }
-    
+
+    def department(self, entry_attributes):
+        return {
+            'content_type_id': 'department',
+            'fields': {self.to_camel_case(e): self._set_field_type(v) for e,v in entry_attributes.iteritems()}
+        }
+
+    def course_page(self, entry_attributes):
+        return {
+            'content_type_id': 'coursePage',
+            'fields': {self.to_camel_case(e): self._set_field_type(v) for e,v in entry_attributes.iteritems()}
+        }
+
+    def course_file(self, entry_attributes):
+        return {
+            'content_type_id': 'courseFile',
+            'fields': {self.to_camel_case(e): self._set_field_type(v) for e,v in entry_attributes.iteritems()}
+        }
+
+    def embedded_media(self, entry_attributes):
+        return {
+            'content_type_id': 'embeddedMedia',
+            'fields': {self.to_camel_case(e): self._set_field_type(v) for e,v in entry_attributes.iteritems()}
+        }
+
+    def _set_field_type(self, v):
+        if isinstance(v, unicode):
+            return self._text_field(v)
+        elif isinstance(v, contentful_management.entry.Entry):
+            return self._single_reference_field(v.sys['id'])
+        elif isinstance(v, list):
+            return self._multi_reference_field([l.sys['id'] for l in v if l])
+        else:
+            return None
+
     def _text_field(self, value):
-        return {'en-US': value}
+        if value!='':
+            return {'en-US': value}
+        else:
+            return None
     
     def _single_reference_field(self, value):
         return {'en-US': self._sys_field(value)}
@@ -134,6 +138,10 @@ class Translate(object):
         param cid: contentful id
         '''
         return {'sys': {'type': 'Link', 'linkType': 'Entry', 'id': cid}}
+
+    def to_camel_case(self, string):
+        components = string.replace('-','_').split('_')
+        return components[0] + ''.join(x.title() for x in components[1:])
     
 
 if __name__ == "__main__":
